@@ -1,10 +1,13 @@
-import numpy as np
 from pathlib import Path
+import json
+import numpy as np
 import xarray as xr
 import rioxarray  # noqa
 from rasterio.enums import Resampling
+
 from .grid import CubeGrid
 from .catalog import upsert_stac_item
+from .provenance import build_provenance
 
 
 RESAMPLING = {
@@ -15,43 +18,6 @@ RESAMPLING = {
     "mode": Resampling.mode,
 }
 
-
-def _standardize_missing(da: xr.DataArray, missing_value: float) -> xr.DataArray:
-    da = da.where(np.isfinite(da), missing_value)
-    da = da.fillna(missing_value)
-    da = da.astype("float32")
-    da = da.rio.write_nodata(missing_value)
-    return da
-
-
-def align_to_grid(
-    da: xr.DataArray,
-    grid: CubeGrid,
-    resampling: str = "bilinear",
-    missing_value: float = -9999.0,
-) -> xr.DataArray:
-    """
-    Reproject/resample source data to the exact target grid.
-
-    Guarantees:
-    - CRS matches grid.crs
-    - x/y coordinates match grid.template()
-    - shape matches target region
-    - no data outside the region is retained
-    - gaps inside the region are filled with missing_value
-    """
-    template = grid.template()
-
-    aligned = da.rio.reproject_match(
-        template,
-        resampling=RESAMPLING[resampling],
-        nodata=missing_value,
-    )
-
-    aligned = aligned.reindex_like(template)
-    aligned = _standardize_missing(aligned, missing_value)
-
-    return aligned
 
 def open_layer(path: str, variable: str | None = None) -> xr.DataArray:
     path = str(path)
@@ -77,14 +43,45 @@ def open_layer(path: str, variable: str | None = None) -> xr.DataArray:
             raise ValueError("NetCDF variable has no CRS. Assign CRS before ingest.")
         da = da.rio.write_crs(crs)
 
-    da.rio.set_spatial_dims(x_dim="lon" if "lon" in da.dims else "x",
-                            y_dim="lat" if "lat" in da.dims else "y",
-                            inplace=True)
+    x_dim = "lon" if "lon" in da.dims else "x"
+    y_dim = "lat" if "lat" in da.dims else "y"
+
+    da.rio.set_spatial_dims(x_dim=x_dim, y_dim=y_dim, inplace=True)
     return da
+
+
+def _standardize_missing(da: xr.DataArray, missing_value: float) -> xr.DataArray:
+    da = da.where(np.isfinite(da), missing_value)
+    da = da.fillna(missing_value)
+    da = da.astype("float32")
+    da = da.rio.write_nodata(missing_value)
+    return da
+
+
+def align_to_grid(
+    da: xr.DataArray,
+    grid: CubeGrid,
+    resampling: str = "bilinear",
+    missing_value: float = -9999.0,
+) -> xr.DataArray:
+    template = grid.template()
+
+    aligned = da.rio.reproject_match(
+        template,
+        resampling=RESAMPLING[resampling],
+        nodata=missing_value,
+    )
+
+    aligned = aligned.reindex_like(template)
+    aligned = _standardize_missing(aligned, missing_value)
+
+    return aligned
+
 
 def ingest_layer(
     source_path: str,
     cube_path: str,
+    cube_name: str,
     grid: CubeGrid,
     layer_name: str,
     variable: str | None = None,
@@ -95,10 +92,15 @@ def ingest_layer(
     overwrite: bool = True,
     stac_dir: str | None = None,
 ):
+    region = region or grid.name
+
     da = open_layer(source_path, variable=variable)
 
+    source_nodata = nodata
     if nodata is not None:
         da = da.rio.write_nodata(nodata)
+    elif da.rio.nodata is not None:
+        source_nodata = da.rio.nodata
 
     da = align_to_grid(
         da,
@@ -107,21 +109,34 @@ def ingest_layer(
         missing_value=missing_value,
     )
 
+    provenance = build_provenance(
+        source_path=source_path,
+        layer_name=layer_name,
+        cube_name=cube_name,
+        grid=grid,
+        region=region,
+        resampling=resampling,
+        source_variable=variable,
+        source_nodata=source_nodata,
+        missing_value=missing_value,
+    )
+
     da.name = layer_name
     da.attrs.update(
         {
             "source_path": str(source_path),
-            "region": region or grid.name,
+            "region": region,
+            "cube_name": cube_name,
             "grid_name": grid.name,
             "resolution_degrees": grid.resolution,
             "crs": grid.crs,
             "missing_value": missing_value,
             "extent": [grid.xmin, grid.ymin, grid.xmax, grid.ymax],
+            "provenance": provenance.to_json(),
         }
     )
 
     ds = da.to_dataset()
-
     mode = "a" if Path(cube_path).exists() else "w"
 
     if not overwrite and mode == "a":
@@ -143,12 +158,12 @@ def ingest_layer(
         upsert_stac_item(
             stac_dir=stac_dir,
             cube_path=cube_path,
+            cube_name=cube_name,
             layer_name=layer_name,
             grid=grid,
             source_path=source_path,
-            region=region or grid.name,
+            region=region,
+            provenance=provenance.to_dict(),
         )
 
     return da
-
-

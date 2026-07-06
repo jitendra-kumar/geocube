@@ -1,5 +1,5 @@
 [project]
-name = "geocube"
+name = "geocube-ml"
 version = "0.1.0"
 dependencies = [
   "xarray",
