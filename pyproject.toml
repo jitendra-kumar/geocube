@@ -13,8 +13,10 @@ dependencies = [
   "geopandas",
   "pandas",
   "numpy",
-  "typer"
+  "typer[all]",
+  "tqdm"
 ]
 
 [project.scripts]
-geocube = "geocube.cli:app"
+geocube = "geocube_ml.cli:app"
+geocube-ml = "geocube_ml.cli:app"

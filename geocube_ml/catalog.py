@@ -23,7 +23,7 @@ def upsert_stac_item(
         catalog = pystac.Catalog.from_file(str(catalog_path))
     else:
         catalog = pystac.Catalog(
-            id="geocube-catalog",
+            id="geocube-ml-catalog",
             description="Lightweight STAC catalog for analysis-ready ancillary Zarr cubes",
         )
 

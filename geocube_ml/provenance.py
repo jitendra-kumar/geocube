@@ -30,7 +30,7 @@ class LayerProvenance:
     source_nodata: float | None
     missing_value: float
     ingested_at_utc: str
-    software: str = "geocube"
+    software: str = "geocube-ml"
     software_version: str = "0.1.0"
     python_version: str = platform.python_version()
 

@@ -2,6 +2,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 import json
 import xarray as xr
+from pathlib import Path
 
 from .grid import CubeGrid
 from .cube import list_layers, load_layers
@@ -102,6 +103,8 @@ class CubeCollection:
         nodata: float | None = None,
         missing_value: float = -9999.0,
         overwrite: bool = True,
+        update_mode: str = "checksum",
+        dry_run: bool = False,
     ):
         record = self.get_cube(cube_name)
         grid = self.load_grid(cube_name)
@@ -118,8 +121,75 @@ class CubeCollection:
             nodata=nodata,
             missing_value=missing_value,
             overwrite=overwrite,
+            update_mode=update_mode,
+            dry_run=dry_run,
             stac_dir=str(self.catalog_dir),
         )
+
+    def ingest_dir(
+        self,
+        cube_name: str,
+        source_dir: str,
+        pattern: str = "*",
+        variable: str | None = None,
+        resampling: str = "bilinear",
+        nodata: float | None = None,
+        missing_value: float = -9999.0,
+        overwrite: bool = True,
+        continue_on_error: bool = True,
+        update_mode: str = "checksum",
+        dry_run: bool = False,
+    ) -> list[dict]:
+        source_dir = Path(source_dir)
+    
+        candidates = sorted(
+            p for p in source_dir.glob(pattern)
+            if p.suffix.lower() in [".tif", ".tiff", ".nc", ".nc4", ".netcdf"]
+        )
+    
+        results = []
+    
+        for path in candidates:
+            layer_name = path.stem
+    
+            try:
+                self.ingest(
+                    cube_name=cube_name,
+                    source_path=str(path),
+                    layer_name=layer_name,
+                    variable=variable,
+                    resampling=resampling,
+                    nodata=nodata,
+                    missing_value=missing_value,
+                    overwrite=overwrite,
+                    update_mode=update_mode,
+                    dry_run=dry_run,
+                )
+    
+                results.append(
+                    {
+                        "source": str(path),
+                        "layer": layer_name,
+                        "status": result["status"],
+                        "reason": result.get("reason"),
+                        "changed_keys": result.get("changed_keys", []),
+                        "error": None,
+                    }
+                )
+    
+            except Exception as exc:
+                result = {
+                    "source": str(path),
+                    "layer": layer_name,
+                    "status": "failed",
+                    "error": str(exc),
+                }
+                results.append(result)
+    
+                if not continue_on_error:
+                    raise
+    
+        return results
 
     def layers(self, cube_name: str | None = None):
         if cube_name:

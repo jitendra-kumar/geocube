@@ -7,6 +7,8 @@ from .grid import CubeGrid
 from .collection import CubeCollection
 from .cube import list_layers, get_layer_provenance, load_layers
 from .extract import extract_points
+from .manifest import load_manifest, validate_cube_manifest
+from .registry import load_registry
 
 app = typer.Typer(help="Build and query analysis-ready ancillary Zarr cubes.")
 
@@ -31,6 +33,8 @@ def collection_add_cube(
     ymin: float = typer.Option(...),
     xmax: float = typer.Option(...),
     ymax: float = typer.Option(...),
+    chunks_y: int = typer.Option(1024),
+    chunks_x: int = typer.Option(1024),
     crs: str = typer.Option("EPSG:4326"),
     description: str | None = typer.Option(None),
 ):
@@ -44,6 +48,7 @@ def collection_add_cube(
         xmax=xmax,
         ymax=ymax,
         crs=crs,
+        chunks=(chunks_y, chunks_x),
     )
 
     collection.add_cube(
@@ -68,10 +73,12 @@ def collection_ingest(
     nodata: float | None = typer.Option(None),
     missing_value: float = typer.Option(-9999.0),
     overwrite: bool = typer.Option(True),
+    update_mode: str = typer.Option( "checksum", help="missing, skip, checksum, or overwrite.",),
+    dry_run: bool = typer.Option(False),
 ):
     collection = CubeCollection(root)
 
-    collection.ingest(
+    result = collection.ingest(
         cube_name=cube_name,
         source_path=source,
         layer_name=layer,
@@ -80,10 +87,53 @@ def collection_ingest(
         nodata=nodata,
         missing_value=missing_value,
         overwrite=overwrite,
+        update_mode=update_mode,
+        dry_run=dry_run,
     )
+    
+    typer.echo(json.dumps(result, indent=2))
 
     typer.echo(f"Ingested {layer} into cube {cube_name}")
 
+@app.command("collection-ingest-dir")
+def collection_ingest_dir(
+    root: str = typer.Argument(...),
+    source_dir: str = typer.Argument(...),
+    cube_name: str = typer.Option(...),
+    pattern: str = typer.Option("*"),
+    variable: str | None = typer.Option(None),
+    resampling: str = typer.Option("bilinear"),
+    nodata: float | None = typer.Option(None),
+    missing_value: float = typer.Option(-9999.0),
+    overwrite: bool = typer.Option(True),
+    continue_on_error: bool = typer.Option(True),
+    update_mode: str = typer.Option( "checksum", help="missing, skip, checksum, or overwrite.",),
+    dry_run: bool = typer.Option(False),
+):
+    collection = CubeCollection(root)
+
+    results = collection.ingest_dir(
+        cube_name=cube_name,
+        source_dir=source_dir,
+        pattern=pattern,
+        variable=variable,
+        resampling=resampling,
+        nodata=nodata,
+        missing_value=missing_value,
+        overwrite=overwrite,
+        continue_on_error=continue_on_error,
+        update_mode=update_mode,
+        dry_run=dry_run,
+    )
+
+    ok = sum(1 for r in results if r["status"] == "ok")
+    failed = sum(1 for r in results if r["status"] == "failed")
+
+    typer.echo(f"Batch ingest complete: {ok} ok, {failed} failed")
+
+    for result in results:
+        if result["status"] == "failed":
+            typer.echo(f"FAILED: {result['source']} :: {result['error']}")
 
 @app.command("collection-layers")
 def collection_layers(
@@ -114,3 +164,42 @@ def provenance_cmd(
 ):
     prov = get_layer_provenance(cube, layer)
     typer.echo(json.dumps(prov, indent=2))
+
+@app.command("manifest")
+def manifest_cmd(
+    cube: str = typer.Argument(...),
+):
+    manifest = load_manifest(cube)
+    typer.echo(json.dumps(manifest, indent=2))
+
+@app.command("validate-manifest")
+def validate_manifest_cmd(
+    cube: str = typer.Argument(...),
+):
+    result = validate_cube_manifest(cube)
+    typer.echo(json.dumps(result, indent=2))
+
+    if not result["ok"]:
+        raise typer.Exit(code=1)
+
+@app.command("registry")
+def registry_cmd(
+    cube: str = typer.Argument(...),
+):
+    registry = load_registry(cube)
+    typer.echo(json.dumps(registry, indent=2))
+
+@app.command("layer-history")
+def layer_history_cmd(
+    cube: str = typer.Argument(...),
+    layer: str = typer.Argument(...),
+):
+    registry = load_registry(cube)
+    entry = registry.get("layers", {}).get(layer)
+
+    if not entry:
+        raise typer.BadParameter(f"No registry entry found for layer: {layer}")
+
+    typer.echo(json.dumps(entry, indent=2))
+
+
