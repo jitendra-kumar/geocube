@@ -402,6 +402,23 @@ training.to_parquet("training_data.parquet")
 The resulting table can be used with scikit-learn, XGBoost, LightGBM, PyTorch,
 TensorFlow, or other ML tooling.
 
+## ML Starter Example
+
+The repository includes an example Python script for collection discovery,
+metadata reporting, selected-layer loading, feature stacking, and quick plots:
+
+```bash
+python tests/examples/ml_starter_geocube_api.py \
+  --search-root /chrysaor/remotesensing/jbk/climate/ngee/src \
+  --collection-root /chrysaor/remotesensing/jbk/climate/ngee/src/arctic_geocubes \
+  --cube-name arctic_30sec \
+  --layers soil_ph soil_soc \
+  --plot-output /tmp/arctic_30sec_soil_layers.png
+```
+
+Use `--no-plot` to only list collections and layer metadata or to load/stack
+layers without creating figures.
+
 ## Metadata And Reproducibility
 
 GeoCube-ML writes three forms of metadata alongside the Zarr data.
