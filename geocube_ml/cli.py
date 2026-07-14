@@ -4,10 +4,19 @@ import typer
 from .grid import CubeGrid
 from .collection import CubeCollection
 from .cube import get_layer_provenance
+from .ingest import list_netcdf_variables
 from .manifest import load_manifest, validate_cube_manifest
 from .registry import load_registry
 
 app = typer.Typer(help="Build and query analysis-ready ancillary Zarr cubes.")
+
+
+def _split_names(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+
+    names = [part.strip() for part in value.replace(",", " ").split()]
+    return names or None
 
 
 @app.command("collection-init")
@@ -66,7 +75,10 @@ def collection_ingest(
     source: str = typer.Argument(...),
     layer: str = typer.Option(...),
     description: str | None = typer.Option(None),
-    variable: str | None = typer.Option(None),
+    variable: str | None = typer.Option(
+        None,
+        help="NetCDF variable name to ingest when source is a NetCDF file.",
+    ),
     resampling: str = typer.Option("bilinear"),
     nodata: float | None = typer.Option(None),
     missing_value: float = typer.Option(-9999.0),
@@ -93,6 +105,87 @@ def collection_ingest(
     typer.echo(json.dumps(result, indent=2))
 
     typer.echo(f"Ingested {layer} into cube {cube_name}")
+
+
+@app.command("netcdf-variables")
+def netcdf_variables_cmd(
+    source: str = typer.Argument(..., help="NetCDF file to inspect."),
+):
+    variables = list_netcdf_variables(source)
+    typer.echo(json.dumps({"source": source, "variables": variables}, indent=2))
+
+
+@app.command("collection-ingest-netcdf")
+def collection_ingest_netcdf(
+    root: str = typer.Argument(...),
+    source: str = typer.Argument(...),
+    cube_name: str = typer.Option(...),
+    variables: str | None = typer.Option(
+        None,
+        "--variables",
+        help="Comma- or space-separated NetCDF variable names to ingest.",
+    ),
+    all_variables: bool = typer.Option(
+        False,
+        help="Ingest all NetCDF data variables.",
+    ),
+    layers: str | None = typer.Option(
+        None,
+        "--layers",
+        help="Optional comma- or space-separated layer names matching --variables.",
+    ),
+    layer_prefix: str | None = typer.Option(
+        None,
+        help="Optional prefix for generated layer names.",
+    ),
+    description: str | None = typer.Option(None),
+    resampling: str = typer.Option("bilinear"),
+    nodata: float | None = typer.Option(None),
+    missing_value: float = typer.Option(-9999.0),
+    overwrite: bool = typer.Option(True),
+    continue_on_error: bool = typer.Option(True),
+    update_mode: str = typer.Option(
+        "checksum",
+        help="missing, skip, checksum, or overwrite.",
+    ),
+    dry_run: bool = typer.Option(False),
+):
+    variable_names = _split_names(variables)
+    layer_names = _split_names(layers)
+
+    if all_variables and variable_names:
+        raise typer.BadParameter("Use --variables or --all-variables, not both.")
+
+    if not all_variables and not variable_names:
+        raise typer.BadParameter("--variables is required unless --all-variables is set.")
+
+    collection = CubeCollection(root)
+    results = collection.ingest_netcdf(
+        cube_name=cube_name,
+        source_path=source,
+        variables=None if all_variables else variable_names,
+        layer_names=layer_names,
+        layer_prefix=layer_prefix,
+        description=description,
+        resampling=resampling,
+        nodata=nodata,
+        missing_value=missing_value,
+        overwrite=overwrite,
+        continue_on_error=continue_on_error,
+        update_mode=update_mode,
+        dry_run=dry_run,
+    )
+
+    typer.echo(json.dumps(results, indent=2))
+
+    completed = sum(
+        1
+        for result in results
+        if result["status"] in {"ingested", "skipped", "would_ingest"}
+    )
+    failed = sum(1 for result in results if result["status"] == "failed")
+    typer.echo(f"NetCDF ingest complete: {completed} completed, {failed} failed")
+
 
 @app.command("collection-ingest-dir")
 def collection_ingest_dir(

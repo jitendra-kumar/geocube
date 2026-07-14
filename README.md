@@ -181,6 +181,14 @@ Recommended resampling:
 
 ### Ingest A NetCDF Variable
 
+Inspect available NetCDF data variables:
+
+```bash
+geocube-ml netcdf-variables /path/to/climate.nc
+```
+
+Ingest one selected variable as one cube layer:
+
 ```bash
 geocube-ml collection-ingest /path/to/my_collection \
   /path/to/climate.nc \
@@ -191,6 +199,25 @@ geocube-ml collection-ingest /path/to/my_collection \
   --resampling bilinear \
   --missing-value -9999
 ```
+
+Ingest several selected NetCDF variables as separate layers:
+
+```bash
+geocube-ml collection-ingest-netcdf /path/to/my_collection \
+  /path/to/climate.nc \
+  --cube-name arctic_30sec \
+  --variables precip,temp \
+  --layers annual_precip,mean_temp \
+  --description "Selected climate predictors." \
+  --resampling bilinear \
+  --missing-value -9999
+```
+
+If `--layers` is omitted, each layer name matches the NetCDF variable name.
+Use `--all-variables` to attempt every NetCDF data variable. GeoCube-ML first
+tries GDAL/rasterio NetCDF access. If that driver is unavailable, it falls back
+to an xarray path for regular 2D latitude/longitude variables on EPSG:4326 grids
+with `nearest` or `bilinear` resampling.
 
 ### Batch Ingest A Directory
 
@@ -335,6 +362,22 @@ collection.ingest(
     source_path="/path/to/ph_0-100cm_mean.tif",
     layer_name="soil_ph",
     description="Mean soil pH from 0 to 100 cm depth.",
+    resampling="bilinear",
+    missing_value=-9999,
+)
+```
+
+Inspect and ingest NetCDF variables:
+
+```python
+variables = collection.netcdf_variables("/path/to/climate.nc")
+
+collection.ingest_netcdf(
+    cube_name="arctic_30sec",
+    source_path="/path/to/climate.nc",
+    variables=["precip", "temp"],
+    layer_names=["annual_precip", "mean_temp"],
+    description="Selected climate predictors.",
     resampling="bilinear",
     missing_value=-9999,
 )

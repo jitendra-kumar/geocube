@@ -11,7 +11,7 @@ from .cube import (
     load_layers,
     rename_layer_data,
 )
-from .ingest import ingest_layer
+from .ingest import ingest_layer, list_netcdf_variables
 from .manifest import remove_layer_manifest, rename_layer_manifest
 from .catalog import delete_stac_item, upsert_stac_item
 from .registry import mark_layer_deleted, rename_layer_registry
@@ -202,6 +202,100 @@ class CubeCollection:
                 if not continue_on_error:
                     raise
     
+        return results
+
+    def netcdf_variables(self, source_path: str) -> list[str]:
+        """List data variables available in a NetCDF source file."""
+        return list_netcdf_variables(source_path)
+
+    def ingest_netcdf(
+        self,
+        cube_name: str,
+        source_path: str,
+        variables: list[str] | None = None,
+        layer_names: list[str] | None = None,
+        layer_prefix: str | None = None,
+        description: str | None = None,
+        resampling: str = "bilinear",
+        nodata: float | None = None,
+        missing_value: float = -9999.0,
+        overwrite: bool = True,
+        continue_on_error: bool = True,
+        update_mode: str = "checksum",
+        dry_run: bool = False,
+    ) -> list[dict]:
+        """
+        Ingest one or more variables from a NetCDF file as separate layers.
+
+        If variables is omitted, all NetCDF data variables are ingested. By
+        default each layer name matches its source variable name. Provide
+        layer_names for a one-to-one variable-to-layer mapping, or layer_prefix
+        to prefix generated layer names.
+        """
+        available = self.netcdf_variables(source_path)
+        selected = list(variables) if variables is not None else available
+
+        missing = [name for name in selected if name not in available]
+        if missing:
+            raise ValueError(
+                f"Missing NetCDF variables: {missing}. Available variables: {available}"
+            )
+
+        if layer_names is not None and layer_prefix is not None:
+            raise ValueError("Use layer_names or layer_prefix, not both.")
+
+        if layer_names is not None:
+            if len(layer_names) != len(selected):
+                raise ValueError("layer_names must match the number of variables.")
+            target_layers = list(layer_names)
+        elif layer_prefix:
+            target_layers = [f"{layer_prefix}_{name}" for name in selected]
+        else:
+            target_layers = selected
+
+        results = []
+        for variable, layer_name in zip(selected, target_layers, strict=True):
+            try:
+                result = self.ingest(
+                    cube_name=cube_name,
+                    source_path=source_path,
+                    layer_name=layer_name,
+                    description=description,
+                    variable=variable,
+                    resampling=resampling,
+                    nodata=nodata,
+                    missing_value=missing_value,
+                    overwrite=overwrite,
+                    update_mode=update_mode,
+                    dry_run=dry_run,
+                )
+
+                results.append(
+                    {
+                        "source": source_path,
+                        "source_variable": variable,
+                        "layer": layer_name,
+                        "status": result["status"],
+                        "reason": result.get("reason"),
+                        "changed_keys": result.get("changed_keys", []),
+                        "error": None,
+                    }
+                )
+
+            except Exception as exc:
+                results.append(
+                    {
+                        "source": source_path,
+                        "source_variable": variable,
+                        "layer": layer_name,
+                        "status": "failed",
+                        "error": str(exc),
+                    }
+                )
+
+                if not continue_on_error:
+                    raise
+
         return results
 
     def update_layer(

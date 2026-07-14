@@ -52,6 +52,7 @@ def update_manifest(
         "missing_value": layer_attrs.get("missing_value"),
         "resampling": layer_attrs.get("resampling"),
         "source_path": layer_attrs.get("source_path"),
+        "source_variable": layer_attrs.get("source_variable"),
         "statistics": stats or {},
         "updated_at_utc": now_utc(),
     }
